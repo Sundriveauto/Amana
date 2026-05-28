@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { api, ApiError, TradeResponse } from "@/lib/api";
@@ -43,7 +43,6 @@ function formatAddress(address: string) {
 
 export default function TradeDetailPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const { token, isAuthenticated } = useAuth();
   const tradeId = params?.id ?? "UNKNOWN";
 
