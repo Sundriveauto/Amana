@@ -1,10 +1,11 @@
-import { Response } from "express";
+import { NextFunction, Response } from "express";
 import { DisputeService } from "../services/dispute.service";
 import { prisma as defaultPrisma } from "../lib/db";
 import { authMiddleware, AuthRequest } from "../middleware/auth.middleware";
 import { validateRequest } from "../middleware/validateRequest";
 import { Router } from "express";
 import { z } from "zod";
+import { AppError } from "../errors/errorCodes";
 
 const listDisputesQuerySchema = z.object({
   status: z.enum(["OPEN", "UNDER_REVIEW", "RESOLVED", "CLOSED"]).optional(),
@@ -15,7 +16,7 @@ const listDisputesQuerySchema = z.object({
 export class DisputeController {
   constructor(private disputeService: DisputeService) {}
 
-  public listMediatorDisputes = async (req: AuthRequest, res: Response) => {
+  public listMediatorDisputes = async (req: AuthRequest, res: Response, next: NextFunction) => {
     const callerAddress = req.user?.walletAddress?.trim();
     if (!callerAddress) {
       return res.status(401).json({ error: "Unauthorized" });
@@ -32,6 +33,9 @@ export class DisputeController {
 
       res.status(200).json(result);
     } catch (error) {
+      if (error instanceof AppError) {
+        return next(error);
+      }
       console.error("List mediator disputes failed:", error);
       res.status(500).json({ error: "Failed to list disputes" });
     }

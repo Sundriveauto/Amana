@@ -48,7 +48,7 @@ function buildCorsOptions(): cors.CorsOptions {
   };
 }
 
-export function createApp(prisma?: PrismaClient): express.Application {
+export function createApp(): express.Application {
   const app = express();
 
   if (env.TRUST_PROXY) {

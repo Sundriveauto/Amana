@@ -1,5 +1,5 @@
 import { PrismaClient, TradeStatus } from "@prisma/client";
-import { Response, Router } from "express";
+import { NextFunction, Response, Router } from "express";
 import { TradeController } from "../controllers/trade.controller";
 import { prisma as defaultPrisma } from "../lib/db";
 import { authMiddleware } from "../middleware/auth.middleware";
@@ -75,33 +75,41 @@ export function createTradeRouter(prisma: PrismaClient = defaultPrisma) {
     "/", 
     authMiddleware, 
     validateRequest({ query: listTradesQuerySchema }),
-    async (req: AuthRequest, res) => {
+    async (req: AuthRequest, res, next: NextFunction) => {
       const callerAddress = requireWalletFromJwt(req, res);
       if (!callerAddress) {
         return;
       }
 
-      const { status, page, limit, sort } = req.query as any;
+      try {
+        const { status, page, limit, sort } = req.query as any;
 
-      const result = await tradeService.listUserTrades(callerAddress, {
-        status,
-        page,
-        limit,
-        sort,
-      });
+        const result = await tradeService.listUserTrades(callerAddress, {
+          status,
+          page,
+          limit,
+          sort,
+        });
 
-      res.status(200).json(result);
+        res.status(200).json(result);
+      } catch (error) {
+        return next(error);
+      }
     }
   );
 
-  router.get("/stats", authMiddleware, async (req: AuthRequest, res) => {
+  router.get("/stats", authMiddleware, async (req: AuthRequest, res, next: NextFunction) => {
     const callerAddress = requireWalletFromJwt(req, res);
     if (!callerAddress) {
       return;
     }
 
-    const stats = await tradeService.getUserStats(callerAddress);
-    res.status(200).json(stats);
+    try {
+      const stats = await tradeService.getUserStats(callerAddress);
+      res.status(200).json(stats);
+    } catch (error) {
+      return next(error);
+    }
   });
 
   router.get(
