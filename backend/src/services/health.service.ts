@@ -14,32 +14,54 @@ interface HealthCheckResponse {
     uptime: number;
     checks: {
         database: HealthIndicatorResult;
+        redis: HealthIndicatorResult;
         indexer: HealthIndicatorResult;
     };
     details: {
         databaseLatency: number;
+        redisLatency: number;
         indexerLagSeconds: number;
         lastProcessedLedger: number | null;
     };
 }
 
 type HealthDatabase = any;
+type HealthRedis = any;
 
 export class HealthService {
     private startTime: number = Date.now();
 
-    constructor(private readonly prisma: HealthDatabase = defaultPrisma) { }
+    private redisClient: HealthRedis | null = null;
+    private redisInitPromise: Promise<void> | null = null;
 
-    /**
-     * Check database connectivity and query performance
-     * Ensures TypeORM-like deep introspection with ~200ms bounds
-     */
+    constructor(
+        private readonly prisma: HealthDatabase = defaultPrisma,
+        redis?: HealthRedis,
+    ) {
+        if (redis !== undefined) {
+            this.redisClient = redis;
+        }
+    }
+
+    private async getRedis(): Promise<HealthRedis> {
+        if (this.redisClient) {
+            return this.redisClient;
+        }
+        if (!this.redisInitPromise) {
+            this.redisInitPromise = (async () => {
+                const { redis } = await import("../lib/redis");
+                this.redisClient = redis;
+            })();
+        }
+        await this.redisInitPromise;
+        return this.redisClient!;
+    }
+
     private async checkDatabase(): Promise<HealthIndicatorResult> {
         const startTime = Date.now();
-        const timeout = 200; // 200ms threshold
+        const timeout = 200;
 
         try {
-            // Execute a simple query to verify database access
             const result = await Promise.race([
                 this.prisma.$queryRaw`SELECT 1 as health_check`,
                 new Promise((_, reject) =>
@@ -73,46 +95,69 @@ export class HealthService {
         }
     }
 
-    /**
-     * Check indexer service health
-     * Validates that the indexer has processed a ledger within the last 15 seconds
-     * Ensures no background task halting
-     */
+    private async checkRedis(): Promise<HealthIndicatorResult> {
+        const startTime = Date.now();
+        const timeout = 200;
+
+        try {
+            const redis = await this.getRedis();
+            await Promise.race([
+                redis.ping(),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Redis ping timeout")), timeout)
+                ),
+            ]);
+
+            const responseTime = Date.now() - startTime;
+
+            return {
+                status: "up",
+                message: "Redis connection healthy",
+                responseTime,
+            };
+        } catch (error) {
+            const responseTime = Date.now() - startTime;
+            appLogger.error({ error }, "Redis health check failed");
+            return {
+                status: "down",
+                message: `Redis check failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+                responseTime,
+            };
+        }
+    }
+
     private async checkIndexer(): Promise<HealthIndicatorResult> {
         const startTime = Date.now();
         const maxLagSeconds = 15;
 
         try {
-            // Fetch the most recent processed ledger
-            const latestLedger = await this.prisma.processedLedger.findFirst({
+            const latestEvent = await this.prisma.processedEvent.findFirst({
                 orderBy: { ledgerSequence: "desc" },
-                take: 1,
             });
 
             const responseTime = Date.now() - startTime;
 
-            if (!latestLedger) {
+            if (!latestEvent) {
                 return {
                     status: "down",
-                    message: "No processed ledgers found - indexer may not have started",
+                    message: "No processed events found - indexer may not have started",
                     responseTime,
                 };
             }
 
-            // Check if the ledger was processed within the last 15 seconds
-            const ledgerAge = (Date.now() - latestLedger.processedAt.getTime()) / 1000;
+            const eventAge = (Date.now() - latestEvent.processedAt.getTime()) / 1000;
 
-            if (ledgerAge > maxLagSeconds) {
+            if (eventAge > maxLagSeconds) {
                 return {
                     status: "down",
-                    message: `Indexer lag exceeds ${maxLagSeconds}s threshold (current: ${ledgerAge.toFixed(1)}s)`,
+                    message: `Indexer lag exceeds ${maxLagSeconds}s threshold (current: ${eventAge.toFixed(1)}s)`,
                     responseTime,
                 };
             }
 
             return {
                 status: "up",
-                message: `Indexer healthy - last ledger processed ${ledgerAge.toFixed(1)}s ago`,
+                message: `Indexer healthy - last event processed ${eventAge.toFixed(1)}s ago`,
                 responseTime,
             };
         } catch (error) {
@@ -126,36 +171,29 @@ export class HealthService {
         }
     }
 
-    /**
-     * Perform comprehensive health check
-     * Returns detailed status for uptime integrations (Datadog, UptimeRobot, etc.)
-     */
     async performHealthCheck(): Promise<HealthCheckResponse> {
         const timestamp = new Date().toISOString();
         const uptime = Date.now() - this.startTime;
 
-        // Run checks in parallel
-        const [databaseCheck, indexerCheck] = await Promise.all([
+        const [databaseCheck, redisCheck, indexerCheck] = await Promise.all([
             this.checkDatabase(),
+            this.checkRedis(),
             this.checkIndexer(),
         ]);
 
-        // Determine overall status
         let status: "healthy" | "degraded" | "unhealthy" = "healthy";
-        if (databaseCheck.status === "down" || indexerCheck.status === "down") {
+        if (databaseCheck.status === "down" || redisCheck.status === "down" || indexerCheck.status === "down") {
             status = "unhealthy";
-        } else if (databaseCheck.responseTime > 150 || indexerCheck.responseTime > 150) {
+        } else if (databaseCheck.responseTime > 150 || redisCheck.responseTime > 150 || indexerCheck.responseTime > 150) {
             status = "degraded";
         }
 
-        // Fetch latest ledger for details
-        const latestLedger = await this.prisma.processedLedger.findFirst({
+        const latestEvent = await this.prisma.processedEvent.findFirst({
             orderBy: { ledgerSequence: "desc" },
-            take: 1,
         });
 
-        const indexerLagSeconds = latestLedger
-            ? (Date.now() - latestLedger.processedAt.getTime()) / 1000
+        const indexerLagSeconds = latestEvent
+            ? (Date.now() - latestEvent.processedAt.getTime()) / 1000
             : -1;
 
         return {
@@ -164,12 +202,34 @@ export class HealthService {
             uptime,
             checks: {
                 database: databaseCheck,
+                redis: redisCheck,
                 indexer: indexerCheck,
             },
             details: {
                 databaseLatency: databaseCheck.responseTime,
+                redisLatency: redisCheck.responseTime,
                 indexerLagSeconds: indexerLagSeconds > 0 ? indexerLagSeconds : 0,
-                lastProcessedLedger: latestLedger?.ledgerSequence ?? null,
+                lastProcessedLedger: latestEvent?.ledgerSequence ?? null,
+            },
+        };
+    }
+
+    async performStartupCheck(): Promise<{ status: "ready" | "not_ready"; timestamp: string; checks: { database: HealthIndicatorResult; redis: HealthIndicatorResult } }> {
+        const timestamp = new Date().toISOString();
+
+        const [databaseCheck, redisCheck] = await Promise.all([
+            this.checkDatabase(),
+            this.checkRedis(),
+        ]);
+
+        const isReady = databaseCheck.status === "up" && redisCheck.status === "up";
+
+        return {
+            status: isReady ? "ready" : "not_ready",
+            timestamp,
+            checks: {
+                database: databaseCheck,
+                redis: redisCheck,
             },
         };
     }
