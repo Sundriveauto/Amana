@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -350,6 +350,7 @@ export default function VaultManagePage() {
   const [activeTab, setActiveTab] = useState<"active" | "all">("active");
   const [modal, setModal] = useState<ActionModal>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const submittingRef = useRef(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [disputeReason, setDisputeReason] = useState("");
@@ -402,7 +403,8 @@ export default function VaultManagePage() {
 
   // Actions
   async function handleConfirm() {
-    if (!modal || !token) return;
+    if (submittingRef.current || !modal || !token) return;
+    submittingRef.current = true;
     setActionBusy(true);
     setActionError(null);
     try {
@@ -434,6 +436,7 @@ export default function VaultManagePage() {
             : "Action failed";
       setActionError(msg);
     } finally {
+      submittingRef.current = false;
       setActionBusy(false);
     }
   }

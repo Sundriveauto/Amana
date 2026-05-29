@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 
 import Link from "next/link";
 import { signTransaction } from "@stellar/freighter-api";
@@ -69,6 +69,7 @@ export default function VaultPage() {
   const [manifestData, setManifestData] = useState<DriverManifestData | null>(
     null,
   );
+  const manifestSubmittingRef = useRef(false);
   const [manifestSubmitting, setManifestSubmitting] = useState(false);
   const [manifestStatus, setManifestStatus] = useState<string | null>(null);
 
@@ -137,11 +138,13 @@ export default function VaultPage() {
     recentTrades?.items[0];
 
   const handleManifestComplete = async (data: DriverManifestData) => {
+    if (manifestSubmittingRef.current) return;
     if (!token || !manifestTrade) {
       setManifestStatus("Connect your wallet and open a funded trade first.");
       return;
     }
 
+    manifestSubmittingRef.current = true;
     setManifestSubmitting(true);
     setManifestStatus(null);
 
@@ -193,6 +196,7 @@ export default function VaultPage() {
           : "Failed to submit manifest",
       );
     } finally {
+      manifestSubmittingRef.current = false;
       setManifestSubmitting(false);
     }
   };

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { StrKey } from "@stellar/stellar-sdk";
 import { signTransaction } from "@stellar/freighter-api";
@@ -24,6 +24,7 @@ export default function Step3Review() {
   const { data, setStep } = useTrade();
   const { token, isAuthenticated, connectWallet, authenticate, isWalletConnected } = useAuth();
   const [loading, setLoading] = useState(false);
+  const submittingRef = useRef(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [tradeId, setTradeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +52,7 @@ export default function Step3Review() {
   const sellerLossBps = Math.round(data.sellerRatio * 100);
 
   const handleSubmit = async () => {
+    if (submittingRef.current) return;
     if (!isAuthenticated || !token) {
       setError("Please connect and authenticate your wallet first.");
       return;
@@ -61,6 +63,7 @@ export default function Step3Review() {
       return;
     }
 
+    submittingRef.current = true;
     setLoading(true);
     setError(null);
 
@@ -112,6 +115,7 @@ export default function Step3Review() {
       }
       setError(errorMessage);
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   };

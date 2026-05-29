@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Address,
   BASE_FEE,
@@ -97,6 +97,8 @@ export default function MediatorPanelClient({ disputeId }: Props) {
     sellerGetsBps: null,
     splitLabel: "",
   });
+
+  const submittingRef = useRef(false);
 
   const [execString, setExecString] = useState<string>("");
 
@@ -248,11 +250,13 @@ export default function MediatorPanelClient({ disputeId }: Props) {
   }
 
   async function executeResolution(sellerGetsBps: number) {
+    if (submittingRef.current) return;
     if (!address) {
       setTxStatus("Connect Freighter first.");
       return;
     }
 
+    submittingRef.current = true;
     const parsedTradeId = Number(disputeId);
     if (!Number.isInteger(parsedTradeId) || parsedTradeId < 0) {
       setTxStatus("Dispute ID must be a numeric on-chain trade_id.");
@@ -327,6 +331,7 @@ export default function MediatorPanelClient({ disputeId }: Props) {
         error instanceof Error ? error.message : "Soroban execution failed",
       );
     } finally {
+      submittingRef.current = false;
       setIsSubmittingTx(false);
     }
   }
@@ -650,8 +655,9 @@ export default function MediatorPanelClient({ disputeId }: Props) {
               </button>
               <button
                 onClick={() => {
+                  const bps = modal.sellerGetsBps!;
                   closeModal();
-                  void executeResolution(modal.sellerGetsBps!);
+                  void executeResolution(bps);
                 }}
                 disabled={isSubmittingTx}
                 className="px-4 py-2.5 bg-emerald-700 text-white text-sm font-medium rounded-md hover:bg-emerald-800 disabled:opacity-50 transition"
