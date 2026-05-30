@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { tradesApi } from "@/lib/api/trades";
 import type { TradeResponse } from "@/lib/api/types";
 
