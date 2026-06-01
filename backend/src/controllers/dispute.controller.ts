@@ -47,8 +47,7 @@ export class DisputeController {
       if (error instanceof AppError) {
         return next(error);
       }
-      console.error("List mediator disputes failed:", error);
-      res.status(500).json({ error: "Failed to list disputes" });
+      return next(error);
     }
   };
 
@@ -77,8 +76,7 @@ export class DisputeController {
       if (error instanceof AppError) {
         return next(error);
       }
-      console.error("Transition dispute status failed:", error);
-      res.status(500).json({ error: "Failed to transition dispute status" });
+      return next(error);
     }
   };
 }

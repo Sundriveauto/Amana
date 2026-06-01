@@ -518,13 +518,23 @@ export class EventListenerService {
   }
 
 
+  /** Parse ledger sequence from a processed-event cache key (`ledger:contract:eventId`). */
+  private ledgerFromProcessedEventKey(key: string): number {
+    const segment = key.split(":")[0];
+    if (segment === undefined || segment === "") {
+      return -1;
+    }
+    const ledger = parseInt(segment, 10);
+    return Number.isFinite(ledger) ? ledger : -1;
+  }
+
   /** Evict oldest events from in-memory set when it exceeds the cache limit. */
   private evictOldEvents(): void {
     if (this.processedEvents.size <= this.config.processedLedgersCacheSize) return;
 
     const sorted = Array.from(this.processedEvents).sort((a, b) => {
-      const ledgerA = parseInt(a.split(":")[0], 10);
-      const ledgerB = parseInt(b.split(":")[0], 10);
+      const ledgerA = this.ledgerFromProcessedEventKey(a);
+      const ledgerB = this.ledgerFromProcessedEventKey(b);
       return ledgerA - ledgerB;
     });
     const toRemove = sorted.length - this.config.processedLedgersCacheSize;
