@@ -174,3 +174,5 @@ Amana is an open-source project aimed at improving food security and trade effic
 ## 📄 License
 
 Distributed under the MIT License. See `LICENSE` for more information.
+
+// setting up and starting out

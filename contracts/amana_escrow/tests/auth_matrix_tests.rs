@@ -208,7 +208,16 @@ fn test_auth_release_funds_buyer_allowed() {
     let h = Harness::new();
     let tid = h.funded_trade(1_000);
     h.client().confirm_delivery(&tid);
-    h.client().release_funds(&tid);
+    h.client().release_funds(&tid, &h.buyer);
+    assert!(matches!(h.client().get_trade(&tid).status, TradeStatus::Completed));
+}
+
+#[test]
+fn test_auth_release_funds_admin_allowed() {
+    let h = Harness::new();
+    let tid = h.funded_trade(1_000);
+    h.client().confirm_delivery(&tid);
+    h.client().release_funds(&tid, &h.admin);
     assert!(matches!(h.client().get_trade(&tid).status, TradeStatus::Completed));
 }
 
@@ -227,11 +236,12 @@ fn test_auth_release_funds_seller_denied() {
                 args: soroban_sdk::vec![
                     &h.env,
                     soroban_sdk::IntoVal::<Env, soroban_sdk::Val>::into_val(&tid, &h.env),
+                    soroban_sdk::IntoVal::<Env, soroban_sdk::Val>::into_val(&h.seller, &h.env),
                 ],
                 sub_invokes: &[],
             },
         }])
-        .release_funds(&tid);
+        .release_funds(&tid, &h.seller);
 }
 
 #[test]
@@ -249,11 +259,12 @@ fn test_auth_release_funds_stranger_denied() {
                 args: soroban_sdk::vec![
                     &h.env,
                     soroban_sdk::IntoVal::<Env, soroban_sdk::Val>::into_val(&tid, &h.env),
+                    soroban_sdk::IntoVal::<Env, soroban_sdk::Val>::into_val(&h.stranger, &h.env),
                 ],
                 sub_invokes: &[],
-            },
-        }])
-        .release_funds(&tid);
+                },
+            }])
+        .release_funds(&tid, &h.stranger);
 }
 
 // ---------------------------------------------------------------------------

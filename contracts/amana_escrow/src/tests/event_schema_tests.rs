@@ -242,7 +242,7 @@ mod event_schema_tests {
         client.deposit(&trade_id);
         client.confirm_delivery(&trade_id);
 
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
 
         assert_last_event_topics(
             &env,

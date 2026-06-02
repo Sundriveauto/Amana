@@ -109,7 +109,7 @@ mod migration_tests {
 
         // ── Settle old trade — token-A balances must change ─────────────────
         old_client.confirm_delivery(&trade_id);
-        old_client.release_funds(&trade_id);
+        old_client.release_funds(&trade_id, &buyer);
 
         let tok_a = token::Client::new(&env, &token_a);
         let tok_b = token::Client::new(&env, &token_b);
@@ -231,11 +231,11 @@ mod migration_tests {
 
         // Settle all three via the happy path
         old_client.confirm_delivery(&t1);
-        old_client.release_funds(&t1);
+        old_client.release_funds(&t1, &buyer);
         old_client.confirm_delivery(&t2);
-        old_client.release_funds(&t2);
+        old_client.release_funds(&t2, &buyer);
         old_client.confirm_delivery(&t3);
-        old_client.release_funds(&t3);
+        old_client.release_funds(&t3, &buyer);
 
         let tok_b = token::Client::new(&env, &token_b);
         // token-B must be completely untouched
@@ -274,7 +274,7 @@ mod migration_tests {
             "token must be unchanged after confirm_delivery"
         );
 
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
         assert_eq!(
             client.get_trade(&trade_id).token,
             token_at_creation,

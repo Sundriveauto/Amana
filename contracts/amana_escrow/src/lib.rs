@@ -930,18 +930,31 @@ impl EscrowContract {
         .publish(&env);
     }
 
-    pub fn release_funds(env: Env, trade_id: u64) {
+    pub fn release_funds(env: Env, trade_id: u64, caller: Address) {
         let key = DataKey::Trade(trade_id);
         let mut trade: Trade = env
             .storage()
             .persistent()
             .get(&key)
             .expect("Trade not found");
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+
         assert!(
             matches!(trade.status, TradeStatus::Delivered),
             "Trade must be delivered"
         );
-        trade.buyer.require_auth();
+
+        caller.require_auth();
+
+        assert!(
+            caller == trade.buyer || caller == admin,
+            "Unauthorized caller"
+        );
+
         let fee_bps: u32 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
         let treasury: Address = env
             .storage()
@@ -1794,7 +1807,7 @@ mod test {
         let trade_id = client.create_trade(&buyer, &seller, &amount, &5000_u32, &5000_u32);
         client.deposit(&trade_id);
         client.confirm_delivery(&trade_id);
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
 
         let token_readonly = token::Client::new(&env, &usdc_id);
         assert_eq!(token_readonly.balance(&seller), 9_900);
@@ -1810,7 +1823,7 @@ mod test {
     fn test_release_sequence_tracks_manifest_delivery_and_release() {
         let env = Env::default();
         env.mock_all_auths();
-        let (contract_id, _usdc_id, _buyer, seller, _treasury, trade_id) =
+        let (contract_id, _usdc_id, buyer, seller, _treasury, trade_id) =
             setup_funded_trade(&env, 10_000_i128, 100_u32);
         let client = EscrowContractClient::new(&env, &contract_id);
 
@@ -1828,7 +1841,7 @@ mod test {
             &String::from_str(&env, "driver-id-hash"),
         );
         client.confirm_delivery(&trade_id);
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
 
         let released_sequence = client.get_release_sequence(&trade_id);
         assert!(released_sequence.manifest_submitted_at.is_some());
@@ -2651,7 +2664,7 @@ mod test {
 
         // Complete the trade successfully
         client.confirm_delivery(&trade_id);
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
 
         // Try to initiate dispute after completion
         let reason = soroban_sdk::String::from_str(&env, "QmTooLateDispute");
@@ -3128,12 +3141,13 @@ mod test {
                     fn_name: "release_funds",
                     args: soroban_sdk::vec![
                         &env,
-                        soroban_sdk::IntoVal::<Env, soroban_sdk::Val>::into_val(&trade_id, &env)
+                        soroban_sdk::IntoVal::<Env, soroban_sdk::Val>::into_val(&trade_id, &env),
+                        soroban_sdk::IntoVal::<Env, soroban_sdk::Val>::into_val(&seller, &env)
                     ],
                     sub_invokes: &[],
                 },
             }])
-            .release_funds(&trade_id);
+            .release_funds(&trade_id, &seller);
     }
 
     #[test]
@@ -3141,11 +3155,11 @@ mod test {
     fn test_release_funds_rejects_wrong_status() {
         let env = Env::default();
         env.mock_all_auths();
-        let (contract_id, _usdc, _buyer, _seller, _treasury, trade_id) =
+        let (contract_id, _usdc, buyer, _seller, _treasury, trade_id) =
             setup_funded_trade(&env, 10_000, 100);
         let client = EscrowContractClient::new(&env, &contract_id);
         // Trade is Funded, not Delivered
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
     }
 
     // Cancellation policy:
@@ -3418,7 +3432,7 @@ mod test {
         let trade = client.get_trade(&trade_id);
         assert!(matches!(trade.status, TradeStatus::Delivered));
 
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
         let trade = client.get_trade(&trade_id);
         assert!(matches!(trade.status, TradeStatus::Completed));
 
@@ -3516,7 +3530,7 @@ mod test {
             client.finalize_path_payment(&trade_id, &buyer);
 
             client.confirm_delivery(&trade_id);
-            client.release_funds(&trade_id);
+            client.release_funds(&trade_id, &buyer);
 
             let trade = client.get_trade(&trade_id);
             assert!(matches!(trade.status, TradeStatus::Completed));
@@ -6056,7 +6070,7 @@ mod property_tests {
             2 => {
                 client.deposit(&trade_id);
                 client.confirm_delivery(&trade_id);
-                client.release_funds(&trade_id);
+                client.release_funds(&trade_id, &buyer);
                 if !matches!(client.get_trade(&trade_id).status, TradeStatus::Completed) {
                     return TestResult::failed();
                 }
@@ -6136,7 +6150,7 @@ mod property_tests {
             2 => {
                 client.deposit(&trade_id);
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    client.release_funds(&trade_id);
+                    client.release_funds(&trade_id, &buyer);
                 }))
             }
             _ => {
@@ -6209,11 +6223,11 @@ mod fee_and_evidence_tests {
     fn test_fee_100_stroops_1pct() {
         let env = Env::default();
         env.mock_all_auths();
-        let (contract_id, _buyer, seller, treasury, usdc_id, trade_id) =
+        let (contract_id, buyer, seller, treasury, usdc_id, trade_id) =
             setup_fee_trade(&env, 100, 100);
         let client = EscrowContractClient::new(&env, &contract_id);
         client.confirm_delivery(&trade_id);
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
         let tok = token::Client::new(&env, &usdc_id);
         assert_eq!(tok.balance(&seller), 99);
         assert_eq!(tok.balance(&treasury), 1);
@@ -6225,11 +6239,11 @@ mod fee_and_evidence_tests {
     fn test_fee_1000_stroops_1pct() {
         let env = Env::default();
         env.mock_all_auths();
-        let (contract_id, _buyer, seller, treasury, usdc_id, trade_id) =
+        let (contract_id, buyer, seller, treasury, usdc_id, trade_id) =
             setup_fee_trade(&env, 1_000, 100);
         let client = EscrowContractClient::new(&env, &contract_id);
         client.confirm_delivery(&trade_id);
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
         let tok = token::Client::new(&env, &usdc_id);
         assert_eq!(tok.balance(&seller), 990);
         assert_eq!(tok.balance(&treasury), 10);
@@ -6241,11 +6255,11 @@ mod fee_and_evidence_tests {
     fn test_fee_1m_stroops_1pct() {
         let env = Env::default();
         env.mock_all_auths();
-        let (contract_id, _buyer, seller, treasury, usdc_id, trade_id) =
+        let (contract_id, buyer, seller, treasury, usdc_id, trade_id) =
             setup_fee_trade(&env, 1_000_000, 100);
         let client = EscrowContractClient::new(&env, &contract_id);
         client.confirm_delivery(&trade_id);
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
         let tok = token::Client::new(&env, &usdc_id);
         assert_eq!(tok.balance(&seller), 990_000);
         assert_eq!(tok.balance(&treasury), 10_000);
@@ -6257,11 +6271,11 @@ mod fee_and_evidence_tests {
     fn test_fee_zero_bps_seller_gets_all() {
         let env = Env::default();
         env.mock_all_auths();
-        let (contract_id, _buyer, seller, treasury, usdc_id, trade_id) =
+        let (contract_id, buyer, seller, treasury, usdc_id, trade_id) =
             setup_fee_trade(&env, 10_000, 0);
         let client = EscrowContractClient::new(&env, &contract_id);
         client.confirm_delivery(&trade_id);
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
         let tok = token::Client::new(&env, &usdc_id);
         assert_eq!(tok.balance(&seller), 10_000);
         assert_eq!(tok.balance(&treasury), 0);
@@ -6273,11 +6287,11 @@ mod fee_and_evidence_tests {
     fn test_fee_1_stroop_rounds_to_zero() {
         let env = Env::default();
         env.mock_all_auths();
-        let (contract_id, _buyer, seller, treasury, usdc_id, trade_id) =
+        let (contract_id, buyer, seller, treasury, usdc_id, trade_id) =
             setup_fee_trade(&env, 1, 100);
         let client = EscrowContractClient::new(&env, &contract_id);
         client.confirm_delivery(&trade_id);
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
         let tok = token::Client::new(&env, &usdc_id);
         assert_eq!(tok.balance(&seller), 1);
         assert_eq!(tok.balance(&treasury), 0);
@@ -6291,11 +6305,11 @@ mod fee_and_evidence_tests {
         for &amount in amounts {
             let env = Env::default();
             env.mock_all_auths();
-            let (contract_id, _buyer, seller, treasury, usdc_id, trade_id) =
+            let (contract_id, buyer, seller, treasury, usdc_id, trade_id) =
                 setup_fee_trade(&env, amount, 100);
             let client = EscrowContractClient::new(&env, &contract_id);
             client.confirm_delivery(&trade_id);
-            client.release_funds(&trade_id);
+            client.release_funds(&trade_id, &buyer);
             let tok = token::Client::new(&env, &usdc_id);
             let total = tok.balance(&seller) + tok.balance(&treasury);
             assert_eq!(
@@ -6316,11 +6330,11 @@ mod fee_and_evidence_tests {
         let env = Env::default();
         env.mock_all_auths();
         // Use max fee_bps = 10000 (100%)
-        let (contract_id, _buyer, _seller, treasury, usdc_id, trade_id) =
+        let (contract_id, buyer, _seller, treasury, usdc_id, trade_id) =
             setup_fee_trade(&env, 100, 10_000);
         let client = EscrowContractClient::new(&env, &contract_id);
         client.confirm_delivery(&trade_id);
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
         let tok = token::Client::new(&env, &usdc_id);
         let fee = tok.balance(&treasury);
         assert!(fee <= 100, "fee {fee} must not exceed original amount 100");
@@ -6332,11 +6346,11 @@ mod fee_and_evidence_tests {
     fn test_fee_rounding_floors_not_ceiling() {
         let env = Env::default();
         env.mock_all_auths();
-        let (contract_id, _buyer, seller, treasury, usdc_id, trade_id) =
+        let (contract_id, buyer, seller, treasury, usdc_id, trade_id) =
             setup_fee_trade(&env, 99, 100);
         let client = EscrowContractClient::new(&env, &contract_id);
         client.confirm_delivery(&trade_id);
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
         let tok = token::Client::new(&env, &usdc_id);
         // 99 * 100 / 10_000 = 0.99 → floors to 0
         assert_eq!(tok.balance(&treasury), 0);
@@ -6351,12 +6365,12 @@ mod fee_and_evidence_tests {
         for fee_bps in fee_bps_cases {
             let env = Env::default();
             env.mock_all_auths();
-            let (contract_id, _buyer, seller, treasury, usdc_id, trade_id) =
+            let (contract_id, buyer, seller, treasury, usdc_id, trade_id) =
                 setup_fee_trade(&env, max_safe_amount, fee_bps);
             let client = EscrowContractClient::new(&env, &contract_id);
 
             client.confirm_delivery(&trade_id);
-            client.release_funds(&trade_id);
+            client.release_funds(&trade_id, &buyer);
 
             let tok = token::Client::new(&env, &usdc_id);
             let expected_fee = (max_safe_amount * fee_bps as i128) / BPS_DIVISOR;
@@ -6377,12 +6391,12 @@ mod fee_and_evidence_tests {
         let env = Env::default();
         env.mock_all_auths();
         let overflowing_amount = (i128::MAX / BPS_DIVISOR) + 1;
-        let (contract_id, _buyer, _seller, _treasury, _usdc_id, trade_id) =
+        let (contract_id, buyer, _seller, _treasury, _usdc_id, trade_id) =
             setup_fee_trade(&env, overflowing_amount, 10_000);
         let client = EscrowContractClient::new(&env, &contract_id);
 
         client.confirm_delivery(&trade_id);
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &buyer);
     }
 
     #[test]

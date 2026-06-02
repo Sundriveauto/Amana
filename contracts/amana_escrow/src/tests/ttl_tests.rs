@@ -212,7 +212,7 @@ mod ttl_tests {
             client.create_trade(&ctx.buyer, &ctx.seller, &10_000_i128, &5000_u32, &5000_u32);
         client.deposit(&trade_id);
         client.confirm_delivery(&trade_id);
-        client.release_funds(&trade_id);
+        client.release_funds(&trade_id, &ctx.buyer);
 
         assert!(
             ctx.ttl() > 0,

@@ -175,7 +175,7 @@ fn test_event_funds_released_payload_integrity() {
     let trade_id = client.create_trade(&buyer, &seller, &10_000_i128, &5000_u32, &5000_u32);
     client.deposit(&trade_id);
     client.confirm_delivery(&trade_id);
-    client.release_funds(&trade_id);
+    client.release_funds(&trade_id, &buyer);
 
     assert_last_topic(&env, symbol_short!("RELSD").into_val(&env));
 
@@ -312,7 +312,7 @@ fn test_full_lifecycle_event_sequence() {
     assert_last_topic(&env, symbol_short!("DELCNF").into_val(&env));
 
     // Release funds
-    client.release_funds(&trade_id);
+    client.release_funds(&trade_id, &buyer);
     assert_last_topic(&env, symbol_short!("RELSD").into_val(&env));
 }
 
