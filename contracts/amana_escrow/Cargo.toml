@@ -44,5 +44,5 @@ name = "event_emission_tests"
 path = "tests/event_emission_tests.rs"
 
 [[test]]
-name = "local_deployment_tests"
-path = "tests/local_deployment_tests.rs"
+name = "expiration_tests"
+path = "tests/expiration_tests.rs"
