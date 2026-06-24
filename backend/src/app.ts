@@ -24,6 +24,8 @@ import userRoutes from "./routes/user.routes";
 import reputationRoutes from "./routes/reputation.routes";
 import { stellarFeesRoutes } from "./routes/stellar.fees";
 import { stellarTxStatusRoutes } from "./routes/stellar.tx.status";
+import { stellarAssetRoutes } from "./routes/stellar.asset";
+import { stellarAccountBalanceRoutes } from "./routes/stellar.account.balance";
 import { env } from "./config/env";
 
 /** Parse the CORS_ORIGINS env var into a usable allowlist.
@@ -135,6 +137,8 @@ export function createApp(): express.Application {
   // Stellar network endpoints
   app.use("/stellar/fees", stellarFeesRoutes);
   app.use("/stellar/tx", stellarTxStatusRoutes);
+  app.use("/stellar/assets", stellarAssetRoutes);
+  app.use("/stellar/account", stellarAccountBalanceRoutes);
 
   // Treasury management
   app.use("/treasury", createTreasuryRouter());
