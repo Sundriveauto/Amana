@@ -18,6 +18,15 @@ export class CircuitBreakerOpenError extends Error {
   }
 }
 
+const registry = new Map<string, CircuitBreaker>();
+
+export function getCircuitBreakerStates(): Array<{ name: string; state: CircuitState }> {
+  return Array.from(registry.entries()).map(([name, cb]) => ({
+    name,
+    state: cb.currentState,
+  }));
+}
+
 export class CircuitBreaker {
   private state: CircuitState = "CLOSED";
   private failureCount = 0;
@@ -37,10 +46,23 @@ export class CircuitBreaker {
     this.successThreshold = options.successThreshold ?? 2;
     this.cooldownMs = options.cooldownMs ?? 30_000;
     this.now = options.now ?? Date.now;
+    registry.set(name, this);
   }
 
   get currentState(): CircuitState {
     return this.state;
+  }
+
+  get failureCountValue(): number {
+    return this.failureCount;
+  }
+
+  get successCountValue(): number {
+    return this.successCount;
+  }
+
+  get openedAtValue(): number | null {
+    return this.openedAt;
   }
 
   async call<T>(operation: () => Promise<T>): Promise<T> {

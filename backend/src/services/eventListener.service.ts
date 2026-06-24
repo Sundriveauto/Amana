@@ -7,6 +7,10 @@ import {
 import { EventType, ParsedEvent } from "../types/events";
 import { dispatchEvent } from "./eventHandlers";
 import { appLogger } from "../middleware/logger";
+import {
+  CircuitBreaker,
+  CircuitBreakerOpenError,
+} from "../lib/circuitBreaker";
 
 type OutboxStatus = "PENDING" | "RETRYING" | "PROCESSED" | "DEAD_LETTER";
 
@@ -96,12 +100,18 @@ export class EventListenerService {
   private running: boolean = false;
   private timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   private currentBackoffMs: number;
+  private stellarCircuit: CircuitBreaker;
 
   constructor(prisma: PrismaClient) {
     this.prisma = prisma;
     this.config = getEventListenerConfig();
     this.server = new StellarSdk.rpc.Server(this.config.rpcUrl);
     this.currentBackoffMs = this.config.backoffInitialMs;
+    this.stellarCircuit = new CircuitBreaker("stellar-rpc", {
+      failureThreshold: 3,
+      successThreshold: 2,
+      cooldownMs: 30_000,
+    });
   }
 
   /** Boot the polling loop. Loads recent processed ledgers from DB into memory. */
@@ -155,16 +165,18 @@ export class EventListenerService {
     try {
       const startLedger = this.lastLedger > 0 ? this.lastLedger + 1 : undefined;
 
-      const response = await this.server.getEvents({
-        startLedger,
-        filters: [
-          {
-            type: "contract",
-            contractIds: [this.config.contractId],
-          },
-        ],
-        limit: 100,
-      } as StellarSdk.rpc.Server.GetEventsRequest);
+      const response = await this.stellarCircuit.call(() =>
+        this.server.getEvents({
+          startLedger,
+          filters: [
+            {
+              type: "contract",
+              contractIds: [this.config.contractId],
+            },
+          ],
+          limit: 100,
+        } as StellarSdk.rpc.Server.GetEventsRequest),
+      );
 
       if (response.events && response.events.length > 0) {
         for (const rawEvent of response.events) {
@@ -175,7 +187,11 @@ export class EventListenerService {
       this.resetBackoff();
       this.scheduleNextPoll(this.config.pollIntervalMs);
     } catch (error) {
-      appLogger.error({ error }, "[EventListener] Poll failed");
+      if (error instanceof CircuitBreakerOpenError) {
+        appLogger.warn({}, "[EventListener] Circuit breaker open — skipping poll");
+      } else {
+        appLogger.error({ error }, "[EventListener] Poll failed");
+      }
       this.handleBackoff();
     }
   }

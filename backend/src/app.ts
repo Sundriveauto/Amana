@@ -19,6 +19,8 @@ import { disputeCategoryRoutes } from "./routes/disputeCategory.routes";
 import { createTreasuryRouter } from "./routes/treasury.routes";
 import userRoutes from "./routes/user.routes";
 import reputationRoutes from "./routes/reputation.routes";
+import { stellarFeesRoutes } from "./routes/stellar.fees";
+import { stellarTxStatusRoutes } from "./routes/stellar.tx.status";
 import { env } from "./config/env";
 
 /** Parse the CORS_ORIGINS env var into a usable allowlist.
@@ -123,6 +125,10 @@ export function createApp(): express.Application {
 
   // Dispute categories: CRUD /dispute-categories
   app.use("/dispute-categories", disputeCategoryRoutes);
+
+  // Stellar network endpoints
+  app.use("/stellar/fees", stellarFeesRoutes);
+  app.use("/stellar/tx", stellarTxStatusRoutes);
 
   // Treasury management
   app.use("/treasury", createTreasuryRouter());

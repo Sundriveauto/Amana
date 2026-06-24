@@ -5,6 +5,7 @@ import { env } from "../config/env";
 import { horizonServer } from "../config/stellar";
 import { getPinataClient } from "../config/ipfs";
 import { AlertService, alertService as defaultAlertService } from "./alert.service";
+import { getCircuitBreakerStates } from "../lib/circuitBreaker";
 
 interface HealthIndicatorResult {
   status: "up" | "down";
@@ -299,6 +300,16 @@ export class HealthService {
   }
 
   /**
+   * Check circuit breaker states for external service calls.
+   */
+  private checkCircuitBreakers(): Array<{ name: string; state: string }> {
+    return getCircuitBreakerStates().map((cb) => ({
+      name: cb.name,
+      state: cb.state,
+    }));
+  }
+
+  /**
    * Perform comprehensive health check
    * Returns detailed status for uptime integrations (Datadog, UptimeRobot, etc.)
    */
@@ -364,6 +375,8 @@ export class HealthService {
             .split(", ")
         : [];
 
+    const circuitBreakers = this.checkCircuitBreakers();
+
     return {
       status,
       timestamp,
@@ -384,6 +397,7 @@ export class HealthService {
         stellarNetwork: env.STELLAR_NETWORK,
         ipfsGateway: env.IPFS_GATEWAY_URL,
         missingEnvVars,
+        circuitBreakers,
       },
     };
   }

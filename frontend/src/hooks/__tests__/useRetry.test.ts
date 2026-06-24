@@ -3,7 +3,7 @@ import { useRetry } from "../useRetry";
 
 describe("useRetry", () => {
   beforeEach(() => {
-    jest.useFakeTimers();
+    jest.useFakeTimers({ advanceTimers: true });
   });
 
   afterEach(() => {

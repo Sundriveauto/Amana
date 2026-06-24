@@ -22,7 +22,6 @@ describe("IPFSService", () => {
     afterEach(() => {
         __resetPinataClient();
         __resetRetrySleepForTests();
-        IPFSService.__resetCircuitForTests();
         delete process.env.IPFS_UPLOAD_TIMEOUT_MS;
         delete process.env.IPFS_PINATA_CIRCUIT_FAILURE_THRESHOLD;
         delete process.env.IPFS_PINATA_CIRCUIT_COOLDOWN_MS;
