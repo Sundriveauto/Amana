@@ -63,8 +63,11 @@ model User {
   tradeTemplates  TradeTemplate[]
   watchlist       UserWatchlist[]
   refreshTokens   RefreshToken[]
+  wallets         UserWallet[]
   webhooks        Webhook[]
+  webhookSubscriptions WebhookSubscription[]
   notifications   InAppNotification[]
+  notificationPreference NotificationPreference?
 
   @@index([walletAddress])
 }
@@ -102,6 +105,7 @@ model Trade {
   manifest      DeliveryManifest?
   evidence      TradeEvidence[]
   watchlistEntries UserWatchlist[]
+  releaseMilestones EscrowReleaseMilestone[]
 
   @@index([tradeId])
   @@index([buyerAddress])
@@ -393,6 +397,23 @@ model WebhookDeliveryAttempt {
   @@index([webhookId, timestamp])
 }
 
+/// WebhookSubscription stores event subscription endpoints owned by a user.
+model WebhookSubscription {
+  id          Int      @id @default(autoincrement())
+  url         String   @db.VarChar(500)
+  events      String[]
+  secretHash  String   @db.VarChar(64)
+  isActive    Boolean  @default(true)
+  userId      Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isActive])
+}
+
 /// InAppNotification represents an in-app notification for a user
 /// - type: Category of notification (e.g. "trade_update", "dispute", "system")
 /// - isRead: Whether the notification has been read
@@ -412,4 +433,37 @@ model InAppNotification {
   user        User     @relation(fields: [userAddress], references: [walletAddress], onDelete: Cascade)
 
   @@index([userAddress, isRead, createdAt])
+}
+
+/// NotificationPreference stores a user's trade notification channel choices.
+/// The JSON payload is keyed by event type, with values like ["email", "push"].
+model NotificationPreference {
+  id          Int      @id @default(autoincrement())
+  userAddress String   @unique @db.VarChar(255)
+  preferences Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userAddress], references: [walletAddress], onDelete: Cascade)
+
+  @@index([userAddress])
+}
+
+/// EscrowReleaseMilestone represents one pre-defined partial release point.
+/// releasedAt is set after the matching on-chain release event is confirmed.
+model EscrowReleaseMilestone {
+  id             Int       @id @default(autoincrement())
+  tradeId        String    @db.VarChar(255)
+  milestoneIndex Int
+  amountUsdc     String    @db.VarChar(100)
+  dueAt          DateTime
+  releasedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  trade          Trade     @relation(fields: [tradeId], references: [tradeId], onDelete: Cascade)
+
+  @@unique([tradeId, milestoneIndex])
+  @@index([tradeId, dueAt])
+  @@index([tradeId, releasedAt])
 }

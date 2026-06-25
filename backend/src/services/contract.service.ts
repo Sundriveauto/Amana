@@ -335,6 +335,70 @@ export class ContractService {
   }
 
   /**
+   * Builds an unsigned Soroban XDR for a manifest declaration pinned to IPFS.
+   */
+  public async buildSubmitTradeManifestTx(input: {
+    tradeId: string;
+    sellerAddress: string;
+    ipfsHash: string;
+  }): Promise<{ unsignedXdr: string }> {
+    if (!this.contractId) throw new Error("CONTRACT_ID is not configured");
+
+    const account = await getRpcAccount(this.rpcServer, input.sellerAddress);
+    const contract = new StellarSdk.Contract(this.contractId);
+
+    const transaction = new StellarSdk.TransactionBuilder(account, {
+      fee: StellarSdk.BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          "submit_trade_manifest",
+          StellarSdk.nativeToScVal(BigInt(input.tradeId), { type: "u64" }),
+          StellarSdk.Address.fromString(input.sellerAddress).toScVal(),
+          StellarSdk.nativeToScVal(input.ipfsHash, { type: "string" }),
+        ),
+      )
+      .setTimeout(DEFAULT_TIMEOUT_SECONDS)
+      .build();
+
+    const prepared = await prepareRpcTransaction(this.rpcServer, transaction);
+    return { unsignedXdr: prepared.toXDR() };
+  }
+
+  /**
+   * Builds an unsigned Soroban XDR for a single scheduled partial release.
+   */
+  public async buildReleaseMilestoneTx(input: {
+    tradeId: string;
+    sourceAddress: string;
+    milestoneIndex: number;
+  }): Promise<{ unsignedXdr: string }> {
+    if (!this.contractId) throw new Error("CONTRACT_ID is not configured");
+
+    const account = await getRpcAccount(this.rpcServer, input.sourceAddress);
+    const contract = new StellarSdk.Contract(this.contractId);
+
+    const transaction = new StellarSdk.TransactionBuilder(account, {
+      fee: StellarSdk.BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          "release_milestone",
+          StellarSdk.nativeToScVal(BigInt(input.tradeId), { type: "u64" }),
+          StellarSdk.nativeToScVal(input.milestoneIndex, { type: "u32" }),
+          StellarSdk.Address.fromString(input.sourceAddress).toScVal(),
+        ),
+      )
+      .setTimeout(DEFAULT_TIMEOUT_SECONDS)
+      .build();
+
+    const prepared = await prepareRpcTransaction(this.rpcServer, transaction);
+    return { unsignedXdr: prepared.toXDR() };
+  }
+
+  /**
    * Builds an unsigned Soroban XDR for `initiate_dispute(trade_id, initiator, reason_hash)`.
    */
   public async buildInitiateDisputeTx(input: {

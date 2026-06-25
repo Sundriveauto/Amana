@@ -43,13 +43,13 @@ export class WebhookService {
       select: {
         id: true,
         url: true,
-        secret: true,
+        secretHash: true,
       },
     });
 
     const deliveryTargets: DeliveryTarget[] = activeSubscriptions.map((subscription) => ({
       url: subscription.url,
-      secret: subscription.secret,
+      secret: subscription.secretHash,
       subscriptionId: subscription.id,
     }));
 

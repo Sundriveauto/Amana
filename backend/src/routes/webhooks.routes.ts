@@ -127,7 +127,7 @@ router.delete(
   validateRequest({ params: webhookIdParamSchema }),
   async (req: AuthRequest, res: Response) => {
     try {
-      const { id } = req.params;
+      const id = Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
       const walletAddress = req.user?.walletAddress;
 
       if (!walletAddress) {

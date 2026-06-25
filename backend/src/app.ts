@@ -12,11 +12,16 @@ import { createTradeRouter } from "./routes/trade.routes";
 import { createTradeTemplateRouter } from "./routes/trade.template.routes";
 import { createTradeWatchlistRouter } from "./routes/trade.watchlist.routes";
 import { createTradeEvidenceRouter } from "./routes/trade.evidence.routes";
+import { createTradeExportRouter } from "./routes/trade.export.routes";
+import { createEscrowReleaseRouter } from "./routes/escrow.release.routes";
+import { createTradeManifestRouter } from "./routes/trade.manifest.routes";
 import { createManifestRouter } from "./routes/manifest.routes";
 import { createEvidenceRouter } from "./routes/evidence.routes";
 import { createAuditTrailRouter } from "./routes/auditTrail.routes";
 import { createGoalsRouter } from "./routes/goals.routes";
 import { createHealthRouter } from "./routes/health.routes";
+import { createNotificationPreferencesRouter } from "./routes/notifications.preferences.routes";
+import { createNotificationsRouter } from "./routes/notifications.inapp.routes";
 import { disputeRoutes } from "./routes/dispute.routes";
 import { disputeCategoryRoutes } from "./routes/disputeCategory.routes";
 import { createTreasuryRouter } from "./routes/treasury.routes";
@@ -111,14 +116,19 @@ export function createApp(): express.Application {
   app.use("/wallet", walletRoutes);
   app.use("/users", userRoutes);
   app.use("/users", reputationRoutes);
+  app.use(createNotificationPreferencesRouter());
+  app.use(createNotificationsRouter());
 
   // These literal routes must precede the generic /trades/:id handler.
+  app.use("/trades", createTradeExportRouter());
   app.use("/trades", createTradeTemplateRouter());
   app.use("/trades", createTradeWatchlistRouter());
   app.use("/trades", createTradeEvidenceRouter());
+  app.use("/trades", createEscrowReleaseRouter());
   app.use("/trades", createTradeRouter());
 
   // Manifest: POST /trades/:id/manifest
+  app.use("/trades/:id/manifest", createTradeManifestRouter());
   app.use("/trades/:id/manifest", createManifestRouter());
 
   // Evidence: GET /trades/:id/evidence and GET /evidence/:cid/stream
