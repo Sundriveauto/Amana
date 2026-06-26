@@ -333,6 +333,12 @@ pub enum DataKey {
     PathPaymentIntent(u64),
     /// Stores release sequencing timestamps for a trade.
     ReleaseSequence(u64),
+    /// Aggregate number of trades ever created.
+    TotalTrades,
+    /// Aggregate number of disputes ever initiated.
+    TotalDisputes,
+    /// Aggregate number of disputes ever resolved.
+    TotalResolved,
     /// Monotonic storage-schema version, written at initialize() and read via
     /// get_schema_version(). Enables forward-compatible migrations without
     /// disturbing any existing key. Appended last so the XDR encoding of every
@@ -607,6 +613,10 @@ impl EscrowContract {
         let ledger_seq = env.ledger().sequence() as u64;
         let trade_id = (ledger_seq << 32) | next_id;
         env.storage().instance().set(&NEXT_TRADE_ID, &(next_id + 1));
+        let total_trades: u64 = env.storage().instance().get(&DataKey::TotalTrades).unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalTrades, &(total_trades + 1));
         let cngn_address: Address = env
             .storage()
             .instance()
@@ -1149,6 +1159,16 @@ impl EscrowContract {
             sequence.disputed_at = Some(at);
         });
 
+        // Increment aggregate dispute counter
+        let total_disputes: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalDisputes)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalDisputes, &(total_disputes + 1));
+
         // Emit on-chain event
         DisputeInitiatedEvent {
             trade_id,
@@ -1283,6 +1303,16 @@ impl EscrowContract {
         Self::update_release_sequence(&env, &trade, |sequence, at| {
             sequence.resolved_at = Some(at);
         });
+
+        // Increment aggregate resolved counter
+        let total_resolved: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalResolved)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalResolved, &(total_resolved + 1));
 
         // 7. Emit event
         DisputeResolvedEvent {
@@ -1573,6 +1603,25 @@ impl EscrowContract {
             .persistent()
             .get(&key)
             .expect("Trade not found")
+    }
+
+    pub fn get_contract_metrics(env: Env) -> (u64, u64, u64) {
+        let total_trades: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalTrades)
+            .unwrap_or(0);
+        let total_disputes: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalDisputes)
+            .unwrap_or(0);
+        let total_resolved: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalResolved)
+            .unwrap_or(0);
+        (total_trades, total_disputes, total_resolved)
     }
 }
 
@@ -3363,7 +3412,6 @@ mod test {
         client.cancel_trade(&trade_id, &buyer);
     }
 
-<<<<<<< HEAD
     // -----------------------------------------------------------------------
     // Path Payment (Volatility Protection) tests
     // -----------------------------------------------------------------------
@@ -3646,7 +3694,7 @@ mod test {
             );
             assert_eq!(cngn_token.balance(&contract_id), 0);
         }
-=======
+}
     #[test]
     #[should_panic(expected = "Cannot cancel trade in current status")]
     fn test_cancel_trade_rejects_after_completed() {
@@ -3691,7 +3739,7 @@ mod test {
         ));
         // Buyer can no longer cancel - already Cancelled
         client.cancel_trade(&trade_id, &buyer);
->>>>>>> upstream/main
+
     }
 }
 
