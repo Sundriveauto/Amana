@@ -27,6 +27,10 @@ pub const MAX_HASH_LEN: u32 = 256;
 /// `get_schema_version()` and run the matching migration. See SECURITY.md.
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
+/// Maximum single-trade escrow value in stroops (i128). Set to 1 trillion cNGN
+/// to guard against fat-finger amounts that would exhaust token supply.
+pub const MAX_TRADE_VALUE: i128 = 1_000_000_000_000_i128;
+
 /// Minimum allowed platform fee in basis points (0.01%).
 pub const MIN_FEE_BPS: u32 = 1;
 /// Maximum allowed platform fee in basis points (5%).
@@ -223,6 +227,19 @@ pub struct PathPaymentExecutedEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Trade history — stored event record
+// ---------------------------------------------------------------------------
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TradeEvent {
+    pub event_type: soroban_sdk::String,
+    pub timestamp: u64,
+    pub actor: Address,
+    pub data: soroban_sdk::String,
+}
+
+// ---------------------------------------------------------------------------
 // Types & Storage
 // ---------------------------------------------------------------------------
 
@@ -340,6 +357,8 @@ pub struct ReleaseSequence {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DataKey {
     Trade(u64),
+    /// Ordered list of TradeEvent records for a given trade, appended on each state transition.
+    TradeHistory(u64),
     Initialized,
     Admin,
     CngnContract,
@@ -708,6 +727,7 @@ impl EscrowContract {
             &DataKey::ReleaseSequence(trade_id),
             &Self::default_release_sequence(&trade),
         );
+        Self::record_trade_event(&env, trade_id, "created", trade.buyer.clone(), "trade created");
         TradeCreatedEvent {
             trade_id,
             buyer,
@@ -737,6 +757,7 @@ impl EscrowContract {
         Self::update_release_sequence(&env, &trade, |sequence, at| {
             sequence.funded_at = Some(at);
         });
+        Self::record_trade_event(&env, trade_id, "funded", trade.buyer.clone(), "escrow funded");
         TradeFundedEvent {
             trade_id,
             amount: trade.amount,
@@ -1077,6 +1098,7 @@ impl EscrowContract {
             sequence.cancelled_at = Some(at);
         });
 
+        Self::record_trade_event(env, trade.trade_id, "cancelled", caller.clone(), "trade cancelled");
         TradeCancelledEvent {
             trade_id: trade.trade_id,
             refund_amount,
@@ -1101,6 +1123,7 @@ impl EscrowContract {
         Self::update_release_sequence(&env, &trade, |sequence, at| {
             sequence.delivered_at = Some(at);
         });
+        Self::record_trade_event(&env, trade_id, "delivered", trade.buyer.clone(), "delivery confirmed");
         DeliveryConfirmedEvent {
             trade_id,
             delivered_at: now,
@@ -1118,6 +1141,11 @@ impl EscrowContract {
 
         caller.require_auth();
 
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
         assert!(
             caller == trade.buyer || caller == admin,
             "Unauthorized caller"
@@ -1153,6 +1181,7 @@ impl EscrowContract {
         Self::update_release_sequence(&env, &trade, |sequence, at| {
             sequence.released_at = Some(at);
         });
+        Self::record_trade_event(&env, trade_id, "released", caller.clone(), "funds released to seller");
         FundsReleasedEvent {
             trade_id,
             seller_amount,
@@ -1216,6 +1245,7 @@ impl EscrowContract {
             sequence.disputed_at = Some(at);
         });
 
+        Self::record_trade_event(&env, trade_id, "disputed", initiator.clone(), "dispute initiated");
         // Emit on-chain event
         DisputeInitiatedEvent {
             trade_id,
@@ -1347,6 +1377,7 @@ impl EscrowContract {
             sequence.resolved_at = Some(at);
         });
 
+        Self::record_trade_event(&env, trade_id, "resolved", mediator.clone(), "dispute resolved by mediator");
         // 7. Emit event
         DisputeResolvedEvent {
             trade_id,
@@ -1617,6 +1648,38 @@ impl EscrowContract {
     pub fn get_trade(env: Env, trade_id: u64) -> Trade {
         let key = DataKey::Trade(trade_id);
         Self::load_trade(&env, &key)
+    }
+
+    /// Returns the chronological list of stored events for a trade.
+    /// Returns an empty Vec if the trade has no recorded events or does not exist.
+    pub fn get_trade_history(env: Env, trade_id: u64) -> soroban_sdk::Vec<TradeEvent> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TradeHistory(trade_id))
+            .unwrap_or_else(|| soroban_sdk::Vec::new(&env))
+    }
+
+    /// Appends a TradeEvent to the persistent history for trade_id.
+    fn record_trade_event(
+        env: &Env,
+        trade_id: u64,
+        event_type: &str,
+        actor: Address,
+        data: &str,
+    ) {
+        let key = DataKey::TradeHistory(trade_id);
+        let mut history: soroban_sdk::Vec<TradeEvent> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| soroban_sdk::Vec::new(env));
+        history.push_back(TradeEvent {
+            event_type: soroban_sdk::String::from_str(env, event_type),
+            timestamp: env.ledger().timestamp(),
+            actor,
+            data: soroban_sdk::String::from_str(env, data),
+        });
+        env.storage().persistent().set(&key, &history);
     }
 }
 
