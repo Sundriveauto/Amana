@@ -170,6 +170,15 @@ pub struct TradeExpiredEvent {
     pub caller: Address,
 }
 
+/// Emitted when both parties agree to extend the delivery deadline.
+#[contractevent(topics = ["DEDEXT"])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeadlineExtendedEvent {
+    pub trade_id: u64,
+    pub old_deadline: u64,
+    pub new_deadline: u64,
+}
+
 /// Emitted when seller submits hashed delivery manifest fields.
 #[contractevent(topics = ["MNFST"])]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1089,6 +1098,58 @@ impl EscrowContract {
             caller,
         }
         .publish(&env);
+    }
+
+    /// Allow both the buyer and seller to mutually agree to extend the delivery
+    /// deadline on a funded trade. The caller is the buyer (who triggers the
+    /// extension), and the contract also requires the seller's authorization.
+    ///
+    /// Reverts if:
+    /// - The trade is not in `Funded` status.
+    /// - The current ledger timestamp is at or past the existing deadline.
+    /// - The new deadline is not strictly in the future.
+    pub fn extend_deadline(env: Env, trade_id: u64, new_deadline: u64) {
+        let key = DataKey::Trade(trade_id);
+        let mut trade: Trade = Self::load_trade(&env, &key);
+
+        // Require authorization from both parties
+        trade.buyer.require_auth();
+        trade.seller.require_auth();
+
+        assert!(
+            matches!(trade.status, TradeStatus::Funded),
+            "Trade must be Funded to extend deadline"
+        );
+
+        let old_deadline = trade
+            .expires_at
+            .expect("Trade has no deadline to extend");
+
+        let now = env.ledger().timestamp();
+        assert!(now < old_deadline, "Cannot extend a deadline that has already passed");
+        assert!(
+            new_deadline > now,
+            "New deadline must be in the future"
+        );
+
+        trade.expires_at = Some(new_deadline);
+        trade.updated_at = now;
+        Self::save_trade(&env, &key, &trade);
+        Self::record_trade_event(
+            &env,
+            trade_id,
+            "deadline_extended",
+            trade.buyer.clone(),
+            "delivery deadline extended",
+        );
+
+        DeadlineExtendedEvent {
+            trade_id,
+            old_deadline,
+            new_deadline,
+        }
+        .publish(&env);
+        Self::bump_instance_ttl(&env);
     }
 
     fn execute_cancellation(env: &Env, trade: &mut Trade, refund_amount: i128, caller: Address) {
