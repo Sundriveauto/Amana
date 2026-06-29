@@ -211,6 +211,14 @@ pub struct FeeRateUpdatedEvent {
     pub new_fee_bps: u32,
 }
 
+/// Emitted when the admin withdraws accrued platform fees from the contract.
+#[contractevent(topics = ["FEEWTH"])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeesWithdrawnEvent {
+    pub amount: i128,
+    pub destination: Address,
+}
+
 /// Emitted when a buyer initiates a path payment deposit.
 #[contractevent(topics = ["PTHINT"])]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -401,6 +409,9 @@ pub enum DataKey {
     TotalDisputes,
     /// Aggregate number of disputes ever resolved.
     TotalResolved,
+    /// Cumulative platform fees accrued from trade completions and dispute
+    /// resolutions. Admin may withdraw any portion via `withdraw_fees()`.
+    AccruedFees,
     /// Monotonic storage-schema version, written at initialize() and read via
     /// get_schema_version(). Enables forward-compatible migrations without
     /// disturbing any existing key. Appended last so the XDR encoding of every
@@ -586,6 +597,48 @@ impl EscrowContract {
             .unwrap_or(0);
         env.storage().instance().set(&DataKey::FeeBps, &new_fee_bps);
         FeeRateUpdatedEvent { old_fee_bps, new_fee_bps }.publish(&env);
+    }
+
+    /// Withdraw accrued platform fees from the contract to `destination`.
+    /// Only the admin may call this. Reverts if `amount` is zero or exceeds
+    /// the currently accrued fees. Emits `FeesWithdrawn`.
+    pub fn withdraw_fees(env: Env, amount: i128, destination: Address) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        admin.require_auth();
+        assert!(amount > 0, "amount must be greater than zero");
+        let accrued_fees: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AccruedFees)
+            .unwrap_or(0);
+        assert!(
+            amount <= accrued_fees,
+            "insufficient accrued fees"
+        );
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::CngnContract)
+            .expect("Not initialized");
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer(&env.current_contract_address(), &destination, &amount);
+        env.storage()
+            .instance()
+            .set(&DataKey::AccruedFees, &(accrued_fees - amount));
+        FeesWithdrawnEvent { amount, destination }.publish(&env);
+        Self::bump_instance_ttl(&env);
+    }
+
+    /// Return the total accrued platform fees that remain unwithdrawn.
+    pub fn get_accrued_fees(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::AccruedFees)
+            .unwrap_or(0)
     }
 
     // -----------------------------------------------------------------------
@@ -858,6 +911,38 @@ impl EscrowContract {
             .instance()
             .get(&DataKey::SourceToken)
             .expect("SourceToken not configured")
+    }
+
+    /// Return the admin address.
+    pub fn get_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized")
+    }
+
+    /// Return the token contract address (formerly cngn_contract).
+    pub fn get_token_contract(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::CngnContract)
+            .expect("Not initialized")
+    }
+
+    /// Return the treasury address.
+    pub fn get_treasury(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .expect("Not initialized")
+    }
+
+    /// Return the current platform fee in basis points.
+    pub fn get_fee_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::FeeBps)
+            .unwrap_or(0)
     }
 
     /// Finalize a previously initiated path payment once cNGN has been received.
@@ -1223,11 +1308,6 @@ impl EscrowContract {
         );
 
         let fee_bps: u32 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
-        let treasury: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Treasury)
-            .expect("Treasury not set");
         let fee_amount = checked_fee_amount(trade.amount, fee_bps);
         let seller_amount = trade.amount - fee_amount;
         assert!(
@@ -1243,7 +1323,14 @@ impl EscrowContract {
             &seller_amount,
         );
         if fee_amount > 0 {
-            token_client.transfer(&env.current_contract_address(), &treasury, &fee_amount);
+            let accrued_fees: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::AccruedFees)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::AccruedFees, &(accrued_fees + fee_amount));
         }
         let now = env.ledger().timestamp();
         trade.status = TradeStatus::Completed;
@@ -1402,11 +1489,6 @@ impl EscrowContract {
 
         // 3. Load fee config
         let fee_bps: u32 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
-        let treasury: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Treasury)
-            .expect("Treasury not set");
 
         // 4. Payout math with loss-sharing
         let total = trade.amount;
@@ -1442,7 +1524,14 @@ impl EscrowContract {
             token_client.transfer(&env.current_contract_address(), &trade.seller, &seller_net);
         }
         if fee > 0 {
-            token_client.transfer(&env.current_contract_address(), &treasury, &fee);
+            let accrued_fees: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::AccruedFees)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::AccruedFees, &(accrued_fees + fee));
         }
         if buyer_refund > 0 {
             token_client.transfer(&env.current_contract_address(), &trade.buyer, &buyer_refund);
@@ -3284,7 +3373,7 @@ mod test {
         let token_mint = token::StellarAssetClient::new(env, &usdc_id);
         token_mint.mint(&buyer, &amount);
         let trade_id =
-            client.create_trade(&buyer, &seller, &amount, &buyer_loss_bps, &seller_loss_bps);
+            client.create_trade(&buyer, &seller, &amount, &buyer_loss_bps, &seller_loss_bps, &None);
         client.deposit(&trade_id);
         let reason = soroban_sdk::String::from_str(env, "QmInvariantTest");
         client.initiate_dispute(&trade_id, &buyer, &reason);
@@ -3891,7 +3980,7 @@ mod test {
         let usdc_id = env
             .register_stellar_asset_contract_v2(admin.clone())
             .address();
-        client.initialize(&admin, &usdc_id, &treasury, &100);
+        client.initialize(&admin, &usdc_id, &treasury, &100, &usdc_id);
         let amount = 10_000_i128;
         let token_client = token::StellarAssetClient::new(&env, &usdc_id);
         token_client.mint(&buyer, &amount);
@@ -6086,7 +6175,7 @@ mod property_tests {
             let seller_loss_bps = 10_000 - buyer_loss_bps;
 
             let trade_id =
-                client.create_trade(&buyer, &seller, &amount, &buyer_loss_bps, &seller_loss_bps);
+                client.create_trade(&buyer, &seller, &amount, &buyer_loss_bps, &seller_loss_bps, &None);
             client.deposit(&trade_id);
             client.initiate_dispute(&trade_id, &buyer, &String::from_str(&env, "reason"));
 
@@ -6361,6 +6450,7 @@ mod property_tests {
             &case.amount,
             &case.buyer_loss_bps,
             &case.seller_loss_bps,
+            &None,
         );
 
         match case.route % 4 {
@@ -6446,6 +6536,7 @@ mod property_tests {
             &case.amount,
             &case.buyer_loss_bps,
             &case.seller_loss_bps,
+            &None,
         );
 
         let rejected = match case.route % 4 {
@@ -7251,7 +7342,7 @@ mod fee_and_evidence_tests {
             .register_stellar_asset_contract_v2(admin.clone())
             .address();
         // fee_bps = 0 so fee is also zero
-        client.initialize(&admin, &usdc_id, &treasury, &0);
+        client.initialize(&admin, &usdc_id, &treasury, &0, &usdc_id);
         let amount = 10_000_i128;
         let token_client = token::StellarAssetClient::new(&env, &usdc_id);
         token_client.mint(&buyer, &amount);
